@@ -25,9 +25,14 @@ class MainActivity : Activity() {
             setPadding((24 * d).toInt(), 0, (24 * d).toInt(), (48 * d).toInt())
         }
         root.addView(TextView(this).apply {
-            text = "Chess Vision"; textSize = 32f; setTextColor(Color.WHITE)
+            text = "Chess Vision 1.3"; textSize = 32f; setTextColor(Color.WHITE)
             typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
             setPadding(0, 0, 0, (24 * d).toInt())
+        })
+        root.addView(TextView(this).apply {
+            text = "Распознавание доски и отслеживание ходов\nДля первого запуска откройте партию с полной начальной расстановкой."
+            textSize = 15f; setTextColor(Color.LTGRAY); gravity = Gravity.CENTER
+            setPadding(0, 0, 0, (20 * d).toInt())
         })
         btn = Button(this).apply { setOnClickListener { onTap() } }
         root.addView(btn)

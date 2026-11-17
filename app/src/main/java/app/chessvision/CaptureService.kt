@@ -103,7 +103,6 @@ class CaptureService : Service() {
         }
 
         if (!vision.ready) {
-            status("Доска обнаружена\nОжидаю начальную позицию\nДля обучения нужны все 32 фигуры")
             if (vision.learn(bmp, r)) {
                 val initial = vision.readDetailed(bmp, r)
                 if (initial.uncertainSquares.isEmpty()) {
@@ -111,8 +110,10 @@ class CaptureService : Service() {
                     trackerInitialized = true
                     status("Доска обнаружена\n32 фигуры обучены\nСторона снизу: ${if (vision.flipped) "чёрные" else "белые"}\nОжидаю первый ход")
                 } else {
-                    status("Шаблоны созданы\nНеуверенное распознавание: ${initial.uncertainSquares.size} клеток\nПроверьте масштаб и тему доски")
+                    status("${vision.learningDiagnostic}\nНеуверенно: ${initial.uncertainSquares.size} клеток\nКлетки: ${initial.uncertainSquares.take(8).joinToString { (it + 1).toString() }}")
                 }
+            } else {
+                status("Доска обнаружена\n${vision.learningDiagnostic}")
             }
             return
         }
@@ -123,7 +124,7 @@ class CaptureService : Service() {
                 trackerInitialized = true
                 status("Начальная позиция распознана\n32 фигуры / 64 клетки\nСторона снизу: ${if (vision.flipped) "чёрные" else "белые"}\nОтслеживание ходов включено")
             } else {
-                status("Шаблоны фигур готовы\nПока неуверенно распознано клеток: ${initial.uncertainSquares.size}\nОжидаю стабильного изображения")
+                status("Шаблоны фигур готовы\nФигур на доске: ${initial.occupiedSquares}/32\nСомнительных клеток: ${initial.uncertainSquares.size}\nКлетки: ${initial.uncertainSquares.take(8).joinToString { (it + 1).toString() }}")
             }
             return
         }

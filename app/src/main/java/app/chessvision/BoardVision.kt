@@ -18,6 +18,8 @@ class BoardVision {
     private var thr = 0f
     var flipped = false; private set          // true = black pieces at the bottom of the screen
     val ready get() = tpl != null
+    var learningDiagnostic: String = "Ожидаю начальную позицию"
+        private set
 
     private class Sq(val edge: FloatArray, val energy: Float, val center: Float)
     private companion object {
@@ -109,20 +111,41 @@ class BoardVision {
 
     // ---- 3. learn from the starting position; also detects which colour is at the bottom ----
     fun learn(b: Bitmap, r: Rect): Boolean {
-        val f = features(b, r); val occ = f.map { it.energy > EN }
-        if (!(0..15).all { occ[it] } || !(48..63).all { occ[it] } || (16..47).any { occ[it] }) return false
-        val up = (0..15).map { f[it].center }.average(); val dn = (48..63).map { f[it].center }.average()
-        if (abs(up - dn) < 40) return false
-        flipped = dn < up                                   // darker pieces at the bottom -> user plays black
-        val sum = HashMap<Char, FloatArray>(); var wc = 0.0; var bc = 0.0
+        val f = features(b, r)
+        val occ = f.map { it.energy > EN }
+        val total = occ.count { it }
+        val upper = (0..15).count { occ[it] }
+        val middle = (16..47).count { occ[it] }
+        val lower = (48..63).count { occ[it] }
+
+        if (upper != 16 || lower != 16 || middle != 0) {
+            learningDiagnostic = "Фигуры: $total/32\nВерхние 2 ряда: $upper/16\nСередина: $middle/32\nНижние 2 ряда: $lower/16\nПорог энергии: $EN"
+            return false
+        }
+
+        val up = (0..15).map { f[it].center }.average().toFloat()
+        val dn = (48..63).map { f[it].center }.average().toFloat()
+        val contrast = abs(up - dn)
+        // center is already normalized by 100 in features(); comparing it to 40
+        // made the check impossible. Use a threshold in the same normalized scale.
+        if (contrast < 0.04f) {
+            learningDiagnostic = "Найдено 32 фигуры, но цвет сторон не различён\nКонтраст: ${"%.3f".format(java.util.Locale.US, contrast)}\nНужно: не менее 0.040\nПроверьте тему и качество изображения"
+            return false
+        }
+
+        flipped = dn < up
+        val sum = HashMap<Char, FloatArray>()
         for (i in (0..15) + (48..63)) {
-            val (file, rank) = fr(i); val c = startPiece(file, rank)
+            val (file, rank) = fr(i)
+            val c = startPiece(file, rank)
             val a = sum.getOrPut(c.lowercaseChar()) { FloatArray(f[i].edge.size) }
             for (k in a.indices) a[k] += f[i].edge[k]
-            if (c.isUpperCase()) wc += f[i].center else bc += f[i].center
         }
-        thr = ((wc + bc) / 32).toFloat()
+        // Average signed centre contrast of the 16 white and 16 black pieces.
+        thr = f.filterIndexed { index, _ -> index in 0..15 || index in 48..63 }
+            .map { it.center }.average().toFloat()
         tpl = sum.mapValues { unit(it.value) }
+        learningDiagnostic = "Обучение завершено: 32/32 фигур\nКонтраст сторон: ${"%.3f".format(java.util.Locale.US, contrast)}\nШаблонов фигур: ${tpl?.size ?: 0}/6"
         return true
     }
 
