@@ -6,6 +6,8 @@ import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.sqrt
 
+data class RecognitionResult(val board: CharArray, val uncertainSquares: List<Int>, val occupiedSquares: Int)
+
 /**
  * Finds the board, learns what the pieces look like from the STARTING position
  * (so it works with any piece set / theme), then reads positions as 64 chars
@@ -64,7 +66,7 @@ class BoardVision {
         }
     }
 
-    // ---- 2. per-square features: edge map (theme independent) + centre brightness (piece colour) ----
+    // ---- 2. per-square features: edge map + centre contrast against local square background ----
     private fun features(b: Bitmap, r: Rect): List<Sq> {
         val s = r.width(); val px = IntArray(s * s)
         Bitmap.createBitmap(b, r.left, r.top, s, s).getPixels(px, 0, s, 0, 0, s, s)
@@ -85,7 +87,12 @@ class BoardVision {
                 if (y in 8..24 && x in 8..24) { en += mag; cn++ }
             }
             var c = 0f; for (y in 11..20) for (x in 11..20) c += g[y][x]
-            Sq(unit(e), en / cn / 255f, c / 100f)
+            // Compare the piece's centre with the local square background. This
+            // compensates for alternating light/dark board squares better than
+            // comparing every piece against one global brightness threshold.
+            val background = (g[2][2] + g[2][N - 3] + g[N - 3][2] + g[N - 3][N - 3]) / 4f
+            val centreMean = c / 100f
+            Sq(unit(e), en / cn / 255f, (centreMean - background) / 100f)
         }
     }
 
@@ -120,15 +127,31 @@ class BoardVision {
     }
 
     // ---- 4. read a position ----
-    fun read(b: Bitmap, r: Rect): CharArray {
-        val t = tpl!!; val f = features(b, r); val g = CharArray(64) { ' ' }
-        for (i in 0..63) if (f[i].energy > EN) {
-            val type = t.maxByOrNull { dot(it.value, f[i].edge) }!!.key
+    /** Reads all squares and reports low-confidence piece classifications separately.
+     * The caller must not send a position to the engine while uncertainSquares is non-empty.
+     */
+    fun readDetailed(b: Bitmap, r: Rect): RecognitionResult {
+        val templates = tpl ?: return RecognitionResult(CharArray(64) { ' ' }, (0..63).toList(), 0)
+        val features = features(b, r)
+        val board = CharArray(64) { ' ' }
+        val uncertain = ArrayList<Int>()
+        var occupied = 0
+        for (i in 0..63) if (features[i].energy > EN) {
+            occupied++
+            val ranked = templates.entries
+                .map { it.key to dot(it.value, features[i].edge) }
+                .sortedByDescending { it.second }
+            val best = ranked[0]
+            val second = ranked.getOrNull(1)?.second ?: -1f
+            // Reject weak matches instead of silently inventing a piece type.
+            if (best.second < 0.10f || best.second - second < 0.018f) uncertain += i
             val (file, rank) = fr(i)
-            g[rank * 8 + file] = if (f[i].center > thr) type.uppercaseChar() else type
+            board[rank * 8 + file] = if (features[i].center > thr) best.first.uppercaseChar() else best.first
         }
-        return g
+        return RecognitionResult(board, uncertain, occupied)
     }
+
+    fun read(b: Bitmap, r: Rect): CharArray = readDetailed(b, r).board
 
     fun fen(g: CharArray, turn: Char): String {
         val sb = StringBuilder()

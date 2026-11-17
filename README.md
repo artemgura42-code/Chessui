@@ -7,8 +7,12 @@
 3. Start the app -> "Начать захват экрана" -> allow overlay + screen capture -> open Lichess / Chess.com -> start a game vs a bot
    from the initial position (the app learns the pieces from the starting position; colour at the bottom = your colour).
 
-Not compiled or tested yet. Tune `EN` in BoardVision.kt if empty squares are seen as occupied (or the reverse).
-Known limits: flat board themes only (no wood textures); do not flip the board mid-game; start capture before the game starts.
+The full Android application has not yet been built or tested on a physical phone in this environment.
+The updated MoveTracker and BoardVision Kotlin classes were compiled separately; move scenarios
+were tested independently. The next verification step is a GitHub Actions APK build and a real-game test.
+Known limits: flat board themes only (no wood textures); do not flip the board mid-game; start capture
+before the game begins from the initial position. Tune `EN` in BoardVision.kt if empty squares are
+seen as occupied (or the reverse).
 Stockfish is GPLv3: fine for personal use, a store release requires publishing the source.
 
 
@@ -18,6 +22,14 @@ The Android workflow downloads the official Stockfish 19 ARM64 universal archive
 from the official Stockfish GitHub release at build time, extracts its executable,
 places it at `app/src/main/jniLibs/arm64-v8a/libstockfish.so`, and packages it
 into the debug APK. The engine is not committed to this repository.
-The floating diagnostic panel reports board detection, initial-position learning,
-FEN, and Stockfish response. The recognition algorithm still requires the starting
-position to learn piece templates and currently assumes a flat checkerboard theme.
+The floating diagnostic panel reports board detection, recognition confidence,
+recognized moves, FEN, and Stockfish response. Piece recognition still learns visual
+templates from the starting position and currently assumes a flat checkerboard theme.
+Low-confidence positions are rejected instead of being sent to Stockfish.
+
+Move tracking compares consecutive recognized boards and accepts a change only when
+it matches one geometrically valid move. It handles ordinary moves, captures, castling,
+en passant, and promotion, and maintains the FEN turn/castling/en-passant/counters.
+This is not a complete chess-rules validator: it does not yet verify check, checkmate,
+king safety, or whether castling passes through an attacked square. If a frame is missed
+or recognition is ambiguous, the tracker stops rather than guessing the move.

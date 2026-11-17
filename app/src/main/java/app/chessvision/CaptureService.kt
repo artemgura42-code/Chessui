@@ -38,10 +38,11 @@ class CaptureService : Service() {
     private var eng: Engine? = null
     private val ui = Handler(Looper.getMainLooper())
     private val vision = BoardVision()
+    private val moveTracker = MoveTracker()
+    private var trackerInitialized = false
     private var last: Bitmap? = null
     private var board: Rect? = null
     private var prevSig = ByteArray(0); private var doneSig = ByteArray(0); private var stable = 0
-    private var prev: CharArray? = null; private var turn = 'w'
     private var w = 0; private var h = 0; private var warned = false
 
     override fun onBind(i: Intent?): IBinder? = null
@@ -104,8 +105,25 @@ class CaptureService : Service() {
         if (!vision.ready) {
             status("Доска обнаружена\nОжидаю начальную позицию\nДля обучения нужны все 32 фигуры")
             if (vision.learn(bmp, r)) {
-                prev = vision.read(bmp, r); turn = 'w'
-                status("Доска обнаружена\nФигуры обучены\nОжидаю ход...")
+                val initial = vision.readDetailed(bmp, r)
+                if (initial.uncertainSquares.isEmpty()) {
+                    moveTracker.reset(initial.board, 'w')
+                    trackerInitialized = true
+                    status("Доска обнаружена\n32 фигуры обучены\nСторона снизу: ${if (vision.flipped) "чёрные" else "белые"}\nОжидаю первый ход")
+                } else {
+                    status("Шаблоны созданы\nНеуверенное распознавание: ${initial.uncertainSquares.size} клеток\nПроверьте масштаб и тему доски")
+                }
+            }
+            return
+        }
+        if (!trackerInitialized) {
+            val initial = vision.readDetailed(bmp, r)
+            if (initial.uncertainSquares.isEmpty()) {
+                moveTracker.reset(initial.board, 'w')
+                trackerInitialized = true
+                status("Начальная позиция распознана\n32 фигуры / 64 клетки\nСторона снизу: ${if (vision.flipped) "чёрные" else "белые"}\nОтслеживание ходов включено")
+            } else {
+                status("Шаблоны фигур готовы\nПока неуверенно распознано клеток: ${initial.uncertainSquares.size}\nОжидаю стабильного изображения")
             }
             return
         }
@@ -114,35 +132,40 @@ class CaptureService : Service() {
         if (stable < 2 || sig.contentEquals(doneSig)) return      // position still moving, or already handled
 
         show(null, r); Thread.sleep(180)                           // hide our arrow so it doesn't pollute recognition
-        val g = vision.read(frame(400) ?: last ?: return, r)
-        track(g)
-        val fen = vision.fen(g, turn)
-        status("Доска: OK\nФигуры распознаны\nХод: $turn\nFEN: ${fen.take(38)}\n${fen.drop(38)}\nАнализ Stockfish...")
+        val read = vision.readDetailed(frame(400) ?: last ?: return, r)
+        if (read.uncertainSquares.isNotEmpty()) {
+            status("Доска обнаружена\nРаспознано занятых клеток: ${read.occupiedSquares}\nСомнительных клеток: ${read.uncertainSquares.size}\nХод не засчитан — жду чёткого кадра")
+            doneSig = sig
+            stable = 0
+            return
+        }
+        val g = read.board
+        val update = moveTracker.update(g)
+        if (update == null) {
+            status("Доска обнаружена\nОбработано 64 клетки\n${moveTracker.lastError ?: "Изменение позиции не подтверждено"}\nХод и анализ не обновлены")
+            doneSig = sig
+            stable = 0
+            return
+        }
+        val fen = moveTracker.fen(g)
+        status("Доска: OK\nХод распознан: ${update.sanLike}\nСледующий ход: ${moveTracker.turn}\nFEN: ${fen.take(38)}\n${fen.drop(38)}\nАнализ Stockfish...")
         var mv: String? = null
-        if (turn == (if (vision.flipped) 'b' else 'w')) {
+        if (moveTracker.turn == (if (vision.flipped) 'b' else 'w')) {
             mv = try {
                 val engine = (eng ?: Engine(this).also { eng = it })
                 engine.best(fen).also { best ->
-                    status("Доска: OK\nFEN: ${fen.take(38)}\n${fen.drop(38)}\nStockfish: ${best ?: "ход не получен"}")
+                    status("Доска: OK\nПоследний ход: ${update.uci}\nFEN: ${fen.take(38)}\n${fen.drop(38)}\nStockfish: ${best ?: "ход не получен"}")
                 }
             } catch (e: Exception) {
-                status("Доска: OK\nStockfish: ОШИБКА\n${e.message ?: "не удалось запустить движок"}")
+                status("Доска: OK\nХод: ${update.uci}\nStockfish: ОШИБКА\n${e.message ?: "не удалось запустить движок"}")
                 if (!warned) { warned = true; ui.post { Toast.makeText(this, "Ошибка запуска Stockfish: ${e.message}", Toast.LENGTH_LONG).show() } }
                 null
             }
         } else {
-            status("Доска: OK\nFEN: ${fen.take(38)}\n${fen.drop(38)}\nОжидаю ход соперника")
+            status("Доска: OK\nПоследний ход: ${update.uci}\nСледующий ход: ${moveTracker.turn}\nОжидаю ход соперника")
         }
         show(mv, r); Thread.sleep(180)
         doneSig = vision.signature(frame(400) ?: last ?: return, r); prevSig = doneSig; stable = 0
-    }
-
-    /** whose move is it: whoever did NOT just put a piece on a new square */
-    private fun track(g: CharArray) {
-        val p = prev; prev = g; p ?: return
-        var wn = false; var bn = false
-        for (i in 0..63) if (g[i] != p[i] && g[i] != ' ') { if (g[i].isUpperCase()) wn = true else bn = true }
-        if (wn != bn) turn = if (wn) 'b' else 'w'
     }
 
     private fun center(sq: String, r: Rect): Pair<Float, Float> {
