@@ -19,6 +19,7 @@ jobs:
         run: |
           unzip -q ChessVision_GitHub_Build.zip -d extracted
           cp -a extracted/cloudChessVision-Android/ChessVision/. .
+          git checkout -- .github/workflows/android.yml
           rm -rf extracted ChessVision_GitHub_Build.zip
 
       - name: Save files
