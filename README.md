@@ -10,3 +10,14 @@
 Not compiled or tested yet. Tune `EN` in BoardVision.kt if empty squares are seen as occupied (or the reverse).
 Known limits: flat board themes only (no wood textures); do not flip the board mid-game; start capture before the game starts.
 Stockfish is GPLv3: fine for personal use, a store release requires publishing the source.
+
+
+## Stockfish integration in the GitHub build
+
+The Android workflow downloads the official Stockfish 19 ARM64 universal archive
+from the official Stockfish GitHub release at build time, extracts its executable,
+places it at `app/src/main/jniLibs/arm64-v8a/libstockfish.so`, and packages it
+into the debug APK. The engine is not committed to this repository.
+The floating diagnostic panel reports board detection, initial-position learning,
+FEN, and Stockfish response. The recognition algorithm still requires the starting
+position to learn piece templates and currently assumes a flat checkerboard theme.

@@ -91,11 +91,22 @@ class CaptureService : Service() {
 
     private fun step() {
         val bmp = frame(0) ?: last ?: return
-        val r = board ?: vision.find(bmp)?.also { board = it } ?: return
-        if (!vision.still(bmp, r)) { board = null; stable = 0; show(null, r); return }   // left the game screen
+        val r = board ?: vision.find(bmp)?.also { board = it } ?: run {
+            status("Захват активен\nИщу шахматную доску...")
+            return
+        }
+        if (!vision.still(bmp, r)) {
+            board = null; stable = 0; show(null, r)
+            status("Экран захвачен\nДоска не подтверждена")
+            return
+        }
 
-        if (!vision.ready) {                       // wait for the starting position, learn the pieces
-            if (vision.learn(bmp, r)) { prev = vision.read(bmp, r); turn = 'w' }
+        if (!vision.ready) {
+            status("Доска обнаружена\nОжидаю начальную позицию\nДля обучения нужны все 32 фигуры")
+            if (vision.learn(bmp, r)) {
+                prev = vision.read(bmp, r); turn = 'w'
+                status("Доска обнаружена\nФигуры обучены\nОжидаю ход...")
+            }
             return
         }
         val sig = vision.signature(bmp, r)
@@ -105,13 +116,22 @@ class CaptureService : Service() {
         show(null, r); Thread.sleep(180)                           // hide our arrow so it doesn't pollute recognition
         val g = vision.read(frame(400) ?: last ?: return, r)
         track(g)
+        val fen = vision.fen(g, turn)
+        status("Доска: OK\nФигуры распознаны\nХод: $turn\nFEN: ${fen.take(38)}\n${fen.drop(38)}\nАнализ Stockfish...")
         var mv: String? = null
         if (turn == (if (vision.flipped) 'b' else 'w')) {
-            mv = try { (eng ?: Engine(this).also { eng = it }).best(vision.fen(g, turn)) }
-            catch (e: Exception) {
-                if (!warned) { warned = true; ui.post { Toast.makeText(this, "Нет движка: положите libstockfish.so в jniLibs", Toast.LENGTH_LONG).show() } }
+            mv = try {
+                val engine = (eng ?: Engine(this).also { eng = it })
+                engine.best(fen).also { best ->
+                    status("Доска: OK\nFEN: ${fen.take(38)}\n${fen.drop(38)}\nStockfish: ${best ?: "ход не получен"}")
+                }
+            } catch (e: Exception) {
+                status("Доска: OK\nStockfish: ОШИБКА\n${e.message ?: "не удалось запустить движок"}")
+                if (!warned) { warned = true; ui.post { Toast.makeText(this, "Ошибка запуска Stockfish: ${e.message}", Toast.LENGTH_LONG).show() } }
                 null
             }
+        } else {
+            status("Доска: OK\nFEN: ${fen.take(38)}\n${fen.drop(38)}\nОжидаю ход соперника")
         }
         show(mv, r); Thread.sleep(180)
         doneSig = vision.signature(frame(400) ?: last ?: return, r); prevSig = doneSig; stable = 0
@@ -131,6 +151,10 @@ class CaptureService : Service() {
         return Pair(r.left + (col + .5f) * q, r.top + (row + .5f) * q)
     }
 
+    private fun status(message: String) {
+        ui.post { overlay?.setStatus(message) }
+    }
+
     private fun show(m: String?, r: Rect) {
         val a = if (m != null) { val (x1, y1) = center(m.substring(0, 2), r); val (x2, y2) = center(m.substring(2, 4), r); floatArrayOf(x1, y1, x2, y2) } else null
         val q = r.width() / 8f
@@ -147,12 +171,30 @@ class CaptureService : Service() {
 
 class ArrowView(c: Context) : View(c) {
     private var a: FloatArray? = null; private var q = 0f
+    @Volatile private var diagnostic = "Chess Vision\nЗапуск захвата..."
+    private val panel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xDD101820.toInt() }
+    private val diagnosticText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFFFFF.toInt(); textSize = 13f * resources.displayMetrics.density
+        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+    }
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCC15781B.toInt(); style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCC15781B.toInt() }
 
     fun set(a: FloatArray?, q: Float) { this.a = a; this.q = q; invalidate() }
+    fun setStatus(value: String) { diagnostic = value; postInvalidate() }
 
     override fun onDraw(c: Canvas) {
+        val density = resources.displayMetrics.density
+        val lines = diagnostic.split('\n').take(7)
+        val left = 12f * density
+        val top = 42f * density
+        val lineHeight = 18f * density
+        val width = minOf(width.toFloat() - 24f * density, 350f * density)
+        val height = (lines.size * lineHeight + 18f * density)
+        c.drawRoundRect(left, top, left + width, top + height, 10f * density, 10f * density, panel)
+        lines.forEachIndexed { index, text ->
+            c.drawText(text.take(54), left + 10f * density, top + (index + 1) * lineHeight, diagnosticText)
+        }
         val a = a ?: return
         val dx = a[2] - a[0]; val dy = a[3] - a[1]; val l = hypot(dx, dy); if (l < 1f) return
         val ux = dx / l; val uy = dy / l; val hd = q * .45f
