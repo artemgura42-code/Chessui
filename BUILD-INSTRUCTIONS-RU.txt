@@ -1,0 +1,20 @@
+СБОРКА CHESS VISION APK ЧЕРЕЗ GITHUB ACTIONS
+
+1. Создайте новый публичный или приватный репозиторий на GitHub.
+2. Загрузите в корень репозитория содержимое этой папки ChessVision
+   (важно: чтобы .github и app находились в корне репозитория).
+3. Откройте на GitHub вкладку Actions.
+4. Выберите workflow "Build Chess Vision APK" и нажмите Run workflow.
+   Также сборка запускается автоматически при push в ветку main или master.
+5. Дождитесь завершения задачи Build.
+6. Внизу страницы запуска откройте Artifacts и скачайте
+   Chess-Vision-debug-APK. Внутри будет app-debug.apk.
+7. Перенесите APK на Android-телефон и установите его.
+
+ВАЖНО ПРО STOCKFISH:
+В исходном архиве нет app/src/main/jniLibs/arm64-v8a/libstockfish.so.
+Поэтому APK может собраться, но шахматный движок не запустится, пока
+совместимая Android-библиотека Stockfish не будет добавлена в эту папку
+и проект не будет собран повторно.
+
+Это debug APK для тестирования, не подписанный release APK для Google Play.
