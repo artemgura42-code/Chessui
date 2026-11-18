@@ -1,3 +1,7 @@
+import java.net.URL
+import java.io.InputStream
+import java.io.OutputStream
+
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
     namespace = "app.chessvision"
@@ -29,9 +33,9 @@ val downloadStockfish by tasks.registering {
             val work = layout.buildDirectory.dir("stockfish-download").get().asFile
             work.mkdirs()
             val archive = work.resolve("stockfish-android-arm64-universal.tar.gz")
-            val url = java.net.URL("https://github.com/official-stockfish/Stockfish/releases/download/sf_19/stockfish-android-arm64-universal.tar.gz")
+            val url = URL("https://github.com/official-stockfish/Stockfish/releases/download/sf_19/stockfish-android-arm64-universal.tar.gz")
             logger.lifecycle("Downloading official Stockfish 19 Android ARM64...")
-            url.openStream().use { input -> archive.outputStream().use { output -> input.copyTo(output) } }
+            url.openStream().use { input: InputStream -> archive.outputStream().use { output: OutputStream -> input.copyTo(output) } }
             val extracted = work.resolve("extracted")
             extracted.deleteRecursively()
             extracted.mkdirs()
@@ -44,8 +48,8 @@ val downloadStockfish by tasks.registering {
             target.setExecutable(true, false)
             val licenseTarget = licenseFile.asFile
             licenseTarget.parentFile.mkdirs()
-            val licenseUrl = java.net.URL("https://raw.githubusercontent.com/official-stockfish/Stockfish/sf_19/Copying.txt")
-            licenseUrl.openStream().use { input -> licenseTarget.outputStream().use { output -> input.copyTo(output) } }
+            val licenseUrl = URL("https://raw.githubusercontent.com/official-stockfish/Stockfish/sf_19/Copying.txt")
+            licenseUrl.openStream().use { input: InputStream -> licenseTarget.outputStream().use { output: OutputStream -> input.copyTo(output) } }
             logger.lifecycle("Stockfish packaged: ${target.length()} bytes; GPL license included")
         }
     }
