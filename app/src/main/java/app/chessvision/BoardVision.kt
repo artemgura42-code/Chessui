@@ -30,33 +30,63 @@ class BoardVision {
     private fun lum(p: Int) = 0.299f * (p shr 16 and 255) + 0.587f * (p shr 8 and 255) + 0.114f * (p and 255)
     private fun dist(a: Int, b: Int) = abs((a shr 16 and 255) - (b shr 16 and 255)) + abs((a shr 8 and 255) - (b shr 8 and 255)) + abs((a and 255) - (b and 255))
 
-    // ---- 1. find the board: an 8x8 checkerboard of two flat colours ----
+    // ---- 1. Find and validate a board robustly, tolerating highlighted squares.
+    // Sample four points near the corners of every square (not the centre, where a piece sits).
     private fun checker(b: Bitmap, x0: Int, y0: Int, s: Int): Float {
+        if (s <= 0 || x0 < 0 || y0 < 0 || x0 + s > b.width || y0 + s > b.height) return 0f
         val q = s / 8f
-        val px = Array(2) { ArrayList<Int>() }
-        for (r in 0..7) for (c in 0..7)
-            px[(r + c) and 1].add(b.getPixel((x0 + (c + .12f) * q).toInt(), (y0 + (r + .12f) * q).toInt()))
-        val med = px.map { l -> l.sortedBy { lum(it) }[l.size / 2] }
-        if (abs(lum(med[0]) - lum(med[1])) < 30) return 0f
-        var ok = 0
-        for (g in 0..1) for (p in px[g]) if (dist(p, med[g]) < 40) ok++
-        return ok / 64f
+        val samples = Array(64) { ArrayList<Int>(4) }
+        val offsets = floatArrayOf(.16f, .84f)
+        for (r in 0..7) for (c in 0..7) {
+            val list = samples[r * 8 + c]
+            for (oy in offsets) for (ox in offsets) {
+                val x = (x0 + (c + ox) * q).toInt().coerceIn(0, b.width - 1)
+                val y = (y0 + (r + oy) * q).toInt().coerceIn(0, b.height - 1)
+                list += b.getPixel(x, y)
+            }
+        }
+        fun medianColor(colors: List<Int>): Int {
+            val rs = colors.map { it shr 16 and 255 }.sorted()
+            val gs = colors.map { it shr 8 and 255 }.sorted()
+            val bs = colors.map { it and 255 }.sorted()
+            val m = colors.size / 2
+            return (rs[m] shl 16) or (gs[m] shl 8) or bs[m]
+        }
+        val groups = Array(2) { ArrayList<Int>() }
+        for (r in 0..7) for (c in 0..7) groups[(r + c) and 1].addAll(samples[r * 8 + c])
+        val med = intArrayOf(medianColor(groups[0]), medianColor(groups[1]))
+        if (abs(lum(med[0]) - lum(med[1])) < 18f) return 0f
+        var goodSquares = 0
+        for (r in 0..7) for (c in 0..7) {
+            val expected = med[(r + c) and 1]
+            val matches = samples[r * 8 + c].count { dist(it, expected) < 68 }
+            if (matches >= 2) goodSquares++
+        }
+        return goodSquares / 64f
     }
 
     fun find(b: Bitmap): Rect? {
-        val w = b.width; var best: Rect? = null; var top = 0.85f
-        for (s in intArrayOf(w, w - w / 50, w - w / 25, w - w / 12)) {
-            val x0 = (w - s) / 2; var y = 0
+        val w = b.width
+        var best: Rect? = null
+        var top = 0.74f
+        val sizes = (listOf(w, w - w / 50, w - w / 25, w - w / 12) +
+            listOf(w - w / 16, w - w / 20)).filter { it > w / 2 }.distinct()
+        for (s in sizes) {
+            val x0 = (w - s) / 2
+            var y = 0
             while (y + s <= b.height) {
-                val sc = checker(b, x0, y, s)
-                if (sc > top) { top = sc; best = Rect(x0, y, x0 + s, y + s) }
+                val score = checker(b, x0, y, s)
+                if (score > top) { top = score; best = Rect(x0, y, x0 + s, y + s) }
                 y += 3
             }
         }
         return best
     }
 
-    fun still(b: Bitmap, r: Rect) = r.bottom <= b.height && checker(b, r.left, r.top, r.width()) > 0.7f
+    // A single highlighted last-move square must not make us lose the board.
+    fun still(b: Bitmap, r: Rect) =
+        r.width() > 0 && r.height() > 0 && r.right <= b.width && r.bottom <= b.height &&
+            checker(b, r.left, r.top, min(r.width(), r.height())) >= 0.52f
 
     /** cheap fingerprint of the board, used to notice that something moved */
     fun signature(b: Bitmap, r: Rect): ByteArray {

@@ -1,0 +1,7 @@
+Chess Vision bundles the official Stockfish 19 Android ARM64 executable.
+Stockfish is free software distributed under the GNU General Public License, version 3.
+The full license text is included in the APK at assets/stockfish/COPYING.txt.
+The corresponding upstream source is available at:
+https://github.com/official-stockfish/Stockfish/tree/sf_19
+Official release and Android binaries:
+https://github.com/official-stockfish/Stockfish/releases/tag/sf_19

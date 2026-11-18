@@ -42,6 +42,7 @@ class CaptureService : Service() {
     private var trackerInitialized = false
     private var last: Bitmap? = null
     private var board: Rect? = null
+    private var boardMisses = 0
     private var prevSig = ByteArray(0); private var doneSig = ByteArray(0); private var stable = 0
     private var w = 0; private var h = 0; private var warned = false
 
@@ -92,14 +93,27 @@ class CaptureService : Service() {
 
     private fun step() {
         val bmp = frame(0) ?: last ?: return
-        val r = board ?: vision.find(bmp)?.also { board = it } ?: run {
+        var r = board ?: vision.find(bmp)?.also { board = it } ?: run {
             status("Захват активен\nИщу шахматную доску...")
             return
         }
         if (!vision.still(bmp, r)) {
-            board = null; stable = 0; show(null, r)
-            status("Экран захвачен\nДоска не подтверждена")
-            return
+            boardMisses++
+            val replacement = vision.find(bmp)
+            if (replacement != null) {
+                board = replacement
+                r = replacement
+                boardMisses = 0
+            } else {
+                stable = 0
+                show(null, r)
+                // Keep learned templates and the last board geometry through brief overlays/animations.
+                if (boardMisses >= 12) board = null
+                status("Захват активен\nПроверяю положение доски...\nОбучение сохранено: ${vision.ready}\nПовторная проверка: $boardMisses/12")
+                return
+            }
+        } else {
+            boardMisses = 0
         }
 
         if (!vision.ready) {
@@ -108,7 +122,7 @@ class CaptureService : Service() {
                 if (initial.uncertainSquares.isEmpty()) {
                     moveTracker.reset(initial.board, 'w')
                     trackerInitialized = true
-                    status("Доска обнаружена\n32 фигуры обучены\nСторона снизу: ${if (vision.flipped) "чёрные" else "белые"}\nОжидаю первый ход")
+                    status("Доска обнаружена\n${vision.learningDiagnostic}\nСторона снизу: ${if (vision.flipped) "чёрные" else "белые"}\nОтслеживание включено")
                 } else {
                     status("${vision.learningDiagnostic}\nНеуверенно: ${initial.uncertainSquares.size} клеток\nКлетки: ${initial.uncertainSquares.take(8).joinToString { (it + 1).toString() }}")
                 }
@@ -149,21 +163,21 @@ class CaptureService : Service() {
             return
         }
         val fen = moveTracker.fen(g)
-        status("Доска: OK\nХод распознан: ${update.sanLike}\nСледующий ход: ${moveTracker.turn}\nFEN: ${fen.take(38)}\n${fen.drop(38)}\nАнализ Stockfish...")
+        status("Доска: OK\nХод распознан: ${update.uci}\nСледующий ход: ${moveTracker.turn}\nЗапускаю Stockfish 19...")
         var mv: String? = null
         if (moveTracker.turn == (if (vision.flipped) 'b' else 'w')) {
             mv = try {
                 val engine = (eng ?: Engine(this).also { eng = it })
                 engine.best(fen).also { best ->
-                    status("Доска: OK\nПоследний ход: ${update.uci}\nFEN: ${fen.take(38)}\n${fen.drop(38)}\nStockfish: ${best ?: "ход не получен"}")
+                    status("Доска: OK\nХод: ${update.uci}\nStockfish 19: ${best ?: "лучший ход не найден"}\n${if (best != null) "Стрелка показана на доске" else "Проверьте распознанную позицию"}")
                 }
             } catch (e: Exception) {
-                status("Доска: OK\nХод: ${update.uci}\nStockfish: ОШИБКА\n${e.message ?: "не удалось запустить движок"}")
+                status("Доска: OK\nХод: ${update.uci}\nStockfish 19: ОШИБКА\n${e.message ?: "не удалось запустить движок"}")
                 if (!warned) { warned = true; ui.post { Toast.makeText(this, "Ошибка запуска Stockfish: ${e.message}", Toast.LENGTH_LONG).show() } }
                 null
             }
         } else {
-            status("Доска: OK\nПоследний ход: ${update.uci}\nСледующий ход: ${moveTracker.turn}\nОжидаю ход соперника")
+            status("Доска: OK\nХод распознан: ${update.uci}\nСледующий ход: ${moveTracker.turn}\nОжидаю ход соперника")
         }
         show(mv, r); Thread.sleep(180)
         doneSig = vision.signature(frame(400) ?: last ?: return, r); prevSig = doneSig; stable = 0

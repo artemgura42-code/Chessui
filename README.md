@@ -33,3 +33,8 @@ en passant, and promotion, and maintains the FEN turn/castling/en-passant/counte
 This is not a complete chess-rules validator: it does not yet verify check, checkmate,
 king safety, or whether castling passes through an attacked square. If a frame is missed
 or recognition is ambiguous, the tracker stops rather than guessing the move.
+
+
+## Stockfish 19 (Android ARM64)
+
+The Gradle build downloads the official Stockfish 19 Android ARM64 universal executable from the `sf_19` release and packages it as `app/src/main/jniLibs/arm64-v8a/libstockfish.so`. The upstream source and GPL-3.0 license are available from https://github.com/official-stockfish/Stockfish/tree/sf_19 and https://github.com/official-stockfish/Stockfish/releases/tag/sf_19.

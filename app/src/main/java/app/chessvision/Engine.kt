@@ -3,32 +3,62 @@ package app.chessvision
 import android.content.Context
 import java.io.BufferedReader
 import java.io.BufferedWriter
+import java.io.File
+import java.io.IOException
 import kotlin.math.min
 
-/** Talks UCI to a Stockfish binary shipped as jniLibs/arm64-v8a/libstockfish.so */
+/** UCI client for the official Stockfish Android ARM64 executable packaged as libstockfish.so. */
 class Engine(ctx: Context) {
-    private val p = ProcessBuilder(ctx.applicationInfo.nativeLibraryDir + "/libstockfish.so").redirectErrorStream(true).start()
-    private val w: BufferedWriter = p.outputStream.bufferedWriter()
-    private val r: BufferedReader = p.inputStream.bufferedReader()
+    private val executable = File(ctx.applicationInfo.nativeLibraryDir, "libstockfish.so")
+    private val process: Process
+    private val writer: BufferedWriter
+    private val reader: BufferedReader
 
     init {
-        send("uci"); until("uciok")
-        send("setoption name Threads value ${min(4, Runtime.getRuntime().availableProcessors())}")
+        if (!executable.isFile || !executable.canExecute()) {
+            throw IOException("Stockfish не найден или не исполняется: ${executable.absolutePath}")
+        }
+        process = ProcessBuilder(executable.absolutePath).redirectErrorStream(true).start()
+        writer = process.outputStream.bufferedWriter()
+        reader = process.inputStream.bufferedReader()
+        send("uci")
+        readUntil("uciok")
+        send("setoption name Threads value ${min(2, Runtime.getRuntime().availableProcessors()).coerceAtLeast(1)}")
         send("setoption name Hash value 64")
-        send("isready"); until("readyok")
+        send("isready")
+        readUntil("readyok")
     }
 
-    private fun send(s: String) { w.write(s + "\n"); w.flush() }
-    private fun until(s: String) { while (true) if (r.readLine()?.startsWith(s) != false) return }
+    private fun send(command: String) {
+        writer.write(command)
+        writer.newLine()
+        writer.flush()
+    }
 
-    @Synchronized
-    fun best(fen: String, ms: Int = 800): String? {
-        send("position fen $fen"); send("go movetime $ms")
+    private fun readUntil(expected: String) {
         while (true) {
-            val l = r.readLine() ?: return null
-            if (l.startsWith("bestmove")) return l.split(" ").getOrNull(1)?.takeIf { it.length >= 4 }
+            val line = reader.readLine() ?: throw IOException("Stockfish завершился до ответа $expected")
+            if (line.startsWith("info string CRITICAL ERROR")) throw IOException("Stockfish отклонил команду: $line")
+            if (line.startsWith(expected)) return
         }
     }
 
-    fun close() { try { send("quit") } catch (_: Exception) {}; p.destroy() }
+    @Synchronized
+    fun best(fen: String, ms: Int = 1200): String? {
+        send("position fen $fen")
+        send("go movetime ${ms.coerceIn(300, 5000)}")
+        while (true) {
+            val line = reader.readLine() ?: throw IOException("Stockfish завершился во время анализа")
+            if (line.startsWith("info string CRITICAL ERROR")) throw IOException("Некорректная позиция FEN: $line")
+            if (line.startsWith("bestmove")) {
+                val move = line.split(Regex("\\s+")).getOrNull(1) ?: return null
+                return move.takeIf { it.matches(Regex("[a-h][1-8][a-h][1-8][qrbn]?")) }
+            }
+        }
+    }
+
+    fun close() {
+        try { send("quit") } catch (_: Exception) { }
+        try { process.destroy() } catch (_: Exception) { }
+    }
 }
