@@ -20,7 +20,6 @@ jobs:
 
           if [ -z "$ZIP_FILE" ]; then
             echo "Archive not found!"
-            echo "Files in repository:"
             ls -la
             exit 1
           fi
@@ -30,7 +29,9 @@ jobs:
 
           cp -a extracted/ChessVision/. .
 
+          # Не разрешаем распаковщику перезаписывать собственные workflow
           git checkout -- .github/workflows/android.yml
+          git checkout -- .github/workflows/unpack.yml
 
           rm -rf extracted "$ZIP_FILE"
 
